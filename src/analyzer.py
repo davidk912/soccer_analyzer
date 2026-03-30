@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 from sklearn.cluster import KMeans
-from ultralytics import YOLO
 
 # ─── 진형 템플릿 (정규화 좌표 [0,1], y=0이 위쪽) ───────────────────────────
 FORMATION_TEMPLATES = {
@@ -102,12 +101,18 @@ TACTICS_DEFAULT = (
 
 class SoccerAnalyzer:
     def __init__(self):
-        self.model = YOLO('yolov8n.pt')
+        self.model = None  # 분석 시작 시 지연 로딩
         self.frame_width = 0
         self.frame_height = 0
 
+    def _load_model(self):
+        if self.model is None:
+            from ultralytics import YOLO
+            self.model = YOLO('yolov8n.pt')
+
     def process_video(self, video_path, sample_every=5, progress_callback=None, stop_check=None):
         """영상에서 프레임을 샘플링하여 선수 감지 및 팀 분리 수행."""
+        self._load_model()
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise ValueError(f"영상을 열 수 없습니다: {video_path}")
