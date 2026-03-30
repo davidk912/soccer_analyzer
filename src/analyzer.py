@@ -106,7 +106,7 @@ class SoccerAnalyzer:
         self.frame_width = 0
         self.frame_height = 0
 
-    def process_video(self, video_path, sample_every=5, progress_callback=None):
+    def process_video(self, video_path, sample_every=5, progress_callback=None, stop_check=None):
         """영상에서 프레임을 샘플링하여 선수 감지 및 팀 분리 수행."""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -124,6 +124,9 @@ class SoccerAnalyzer:
         processed = 0
 
         while True:
+            if stop_check and stop_check():
+                break
+
             ret, frame = cap.read()
             if not ret:
                 break

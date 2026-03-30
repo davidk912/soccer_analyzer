@@ -135,6 +135,7 @@ class YoutubeWorker(QThread):
 class AnalysisWorker(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal(dict)
+    stopped = pyqtSignal()
     error = pyqtSignal(str)
 
     def __init__(self, video_path, sample_every):
@@ -142,14 +143,23 @@ class AnalysisWorker(QThread):
         self.video_path = video_path
         self.sample_every = sample_every
         self.analyzer = SoccerAnalyzer()
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
 
     def run(self):
         try:
             raw = self.analyzer.process_video(
                 self.video_path,
                 sample_every=self.sample_every,
-                progress_callback=lambda p: self.progress.emit(p)
+                progress_callback=lambda p: self.progress.emit(p),
+                stop_check=lambda: self._stop,
             )
+
+            if self._stop:
+                self.stopped.emit()
+                return
             self.progress.emit(90)
 
             team_a_formation, team_a_centers = self.analyzer.analyze_formation(
@@ -252,6 +262,16 @@ class MainWindow(QMainWindow):
         self.progress_bar.setFixedWidth(160)
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
+
+        # 분석 중지
+        self.stop_btn = QPushButton('■ 중지')
+        self.stop_btn.setVisible(False)
+        self.stop_btn.setStyleSheet(
+            'background-color: #b91c1c; color: white; border: none; '
+            'border-radius: 6px; padding: 8px 16px; font-size: 13px; font-weight: bold;'
+        )
+        self.stop_btn.clicked.connect(self.stop_analysis)
+        layout.addWidget(self.stop_btn)
 
         # 재생/정지
         self.play_btn = QPushButton('▶ 재생')
@@ -518,20 +538,39 @@ class MainWindow(QMainWindow):
         self.yt_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
+        self.stop_btn.setVisible(True)
         self.tactics_text.setPlainText('분석 중...')
 
         self.worker = AnalysisWorker(self.video_path, self.sample_spin.value())
         self.worker.progress.connect(self.progress_bar.setValue)
         self.worker.finished.connect(self.on_analysis_complete)
+        self.worker.stopped.connect(self.on_analysis_stopped)
         self.worker.error.connect(self.on_analysis_error)
         self.worker.start()
 
-    def on_analysis_complete(self, results):
-        self.analysis_results = results
+    def _reset_analysis_ui(self):
         self.analyze_btn.setEnabled(True)
         self.open_btn.setEnabled(True)
         self.yt_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
+        self.stop_btn.setVisible(False)
+
+    def stop_analysis(self):
+        if self.worker and self.worker.isRunning():
+            self.stop_btn.setEnabled(False)
+            self.stop_btn.setText('중지 중...')
+            self.worker.stop()
+
+    def on_analysis_stopped(self):
+        self._reset_analysis_ui()
+        self.stop_btn.setEnabled(True)
+        self.stop_btn.setText('■ 중지')
+        self.tactics_text.setPlainText('분석이 중지되었습니다.')
+        self.progress_bar.setValue(0)
+
+    def on_analysis_complete(self, results):
+        self.analysis_results = results
+        self._reset_analysis_ui()
 
         # 진형 탭 업데이트
         self.team_a_badge.setText(f"팀 A: {results['team_a_formation']}")
@@ -562,10 +601,7 @@ class MainWindow(QMainWindow):
         )
 
     def on_analysis_error(self, msg):
-        self.analyze_btn.setEnabled(True)
-        self.open_btn.setEnabled(True)
-        self.yt_btn.setEnabled(True)
-        self.progress_bar.setVisible(False)
+        self._reset_analysis_ui()
         QMessageBox.critical(self, '분석 오류', f'분석 중 오류가 발생했습니다:\n{msg}')
 
     def update_heatmap(self, team):
